@@ -54,7 +54,7 @@ function mainMenu(viewer: Player) {
 
       const playerCoords = parseCoords(viewer, location);
       if (typeof playerCoords === "string") {
-        viewer.sendMessage(playerCoords);
+        return;
       } else {
         const flooredX = Math.floor(playerCoords.x);
         const flooredY = Math.floor(playerCoords.y);
