@@ -54,12 +54,11 @@ function mainMenu(viewer: Player) {
 
       const playerCoords = parseCoords(viewer, location);
       if (typeof playerCoords === "string") {
-        viewer.sendMessage(playerCoords); // Handle error
+        viewer.sendMessage(playerCoords);
       } else {
         const flooredX = Math.floor(playerCoords.x);
         const flooredY = Math.floor(playerCoords.y);
         const flooredZ = Math.floor(playerCoords.z);
-        console.warn(`x: ${flooredX}, y: ${flooredY}, z: ${flooredZ}`);
 
         try {
           const block = viewer.dimension.getBlock(new Vector3(flooredX, flooredY, flooredZ));
@@ -457,7 +456,6 @@ function editItemDetails(viewer: Player, item: ItemStack, container: Container, 
 
       const canPlaceOnInputList = canPlaceOnInput.split(',').map(block => block.trim()).filter(block => block !== '');
       const validCanPlaceOnBlocks: string[] = [];
-      console.warn(validCanPlaceOnBlocks);
       for (const block of canPlaceOnInputList) {
         if (BlockTypes.get(block)) {
           validCanPlaceOnBlocks.push(block);
