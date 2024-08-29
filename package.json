@@ -1,0 +1,22 @@
+{
+  "name": "item-editor-mcbe",
+  "version": "1.0.0",
+  "description": "This project provides you an Add-on for Minecraft Bedrock which let's you edit item properties (nametag, durability etc) in-game!",
+  "main": "main.js",
+  "scripts": {
+    "build": "tsc --build",
+    "watch": "tsc --watch"
+  },
+  "author": "Justash01",
+  "license": "MIT",
+  "dependencies": {
+    "@minecraft/server": "^1.14.0-beta.1.21.22-stable",
+    "@minecraft/server-ui": "^1.3.0-beta.1.21.22-stable"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  },
+  "overrides": {
+    "@minecraft/server": "$@minecraft/server"
+  }
+}
