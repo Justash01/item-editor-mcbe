@@ -7,6 +7,10 @@ This project provides an add-on for Minecraft Bedrock Edition that allows direct
 - Manipulate items in entities' inventories or block containers.
 - User-friendly GUI within Minecraft.
 
+### Author
+- [Justash01](https://github.com/Justash01) on GitHub
+- Discord: `jstash`
+
 ## Getting Started
 
 ### Prerequisites
@@ -24,7 +28,3 @@ This project provides an add-on for Minecraft Bedrock Edition that allows direct
    /scriptevent item:editor
    ```
 4. Continue using the editor through the in-game GUI.
-
-### Author
-- [Justash01](https://github.com/Justash01) on GitHub
-- Discord: `jstash`
