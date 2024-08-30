@@ -1,15 +1,22 @@
 /**
- * Item Editor v1.0
+ * Item Editor 
  * 
- * My discord: jstash
- * Github: https://github.com/Justash01
+ * My Discord: jstash
+ * My Github: https://github.com/Justash01
  * Github Repository: https://github.com/Justash01/item-editor-mcbe
 */
 
 
-import { RawText, Block, ItemStack, ItemComponentTypes, ScriptEventCommandMessageAfterEvent, system, ItemLockMode, Player, Entity, EntityComponentTypes, Container, EntityInventoryComponent, Enchantment, BlockComponentTypes, BlockInventoryComponent, ItemDurabilityComponent, ItemEnchantableComponent, ItemFoodComponent, BlockTypes } from "@minecraft/server";
+import { RawText, Block, ItemStack, ItemComponentTypes, ScriptEventCommandMessageAfterEvent, system, ItemLockMode, Player, Entity, EntityComponentTypes, Container, EntityInventoryComponent, Enchantment, BlockComponentTypes, BlockInventoryComponent, ItemDurabilityComponent, ItemEnchantableComponent, ItemFoodComponent, BlockTypes, world, GameMode, EntityEquippableComponent, EquipmentSlot } from "@minecraft/server";
 import * as ui from "@minecraft/server-ui";
-import { Vector3, parseCoords, parseSelector, getName, parseEnchantments, convertToRomanNumerals, idToName, FormFieldManager } from "./utils";
+import { Vector3, parseCoords, parseSelector, isSameItem, getName, parseEnchantments, formatSlotName, convertToRomanNumerals, idToName, FormFieldManager } from "./utils";
+
+/**
+ * This will run onTick function every tick (20 ticks = 1 second)
+ * Adjust this if it's causing lag in your world.
+ * Though do note that it will then affect how often item's durability is reverted.
+*/
+var tickDelay = 1;
 
 /**
  * Main menu for the item editor.
@@ -19,7 +26,7 @@ import { Vector3, parseCoords, parseSelector, getName, parseEnchantments, conver
  */
 function mainMenu(viewer: Player) {
   const menu = new ui.ModalFormData()
-  .title("§0Item Editor §8v1.0§0 by §8JstAsh§r")
+  .title(`§0Item Editor by §8JstAsh§r`)
   .dropdown("§fThis editor allows you to modify items from either an entity or a block container.\n\n§7Source type:", [ "Entity", "Block" ], 0)
   .textField("§7Entity selector or block location:", "e.g., \"@a[r=10]\" or \"~ ~-1 ~\"", "")
   .submitButton("Search for items")
@@ -69,7 +76,7 @@ function mainMenu(viewer: Player) {
   
           getContainer(viewer, block);
         } catch (e) {
-          showErrorMessage(viewer, `Trying to access location (${flooredX}, ${flooredY}, ${flooredZ}) which is outside of the world boundaries.`, () => mainMenu(viewer));
+          showErrorMessage(viewer, `Error occurred: ${e}`, () => mainMenu(viewer));
           return;
         }
       }
@@ -119,7 +126,23 @@ function listEntities(viewer: Player, entities: Entity[]) {
 function getContainer(viewer: Player, target: Entity | Block, targetEntities?: Entity[]) {
   if (target instanceof Entity) {
     const inventoryComp = target.getComponent(EntityComponentTypes.Inventory) as EntityInventoryComponent;
+    const equippableComp = target.getComponent(EntityComponentTypes.Equippable) as EntityEquippableComponent;
     const container = inventoryComp?.container as Container;
+
+    const isContainerEmpty = container.emptySlotsCount === container.size;
+
+    let areEquipmentSlotsEmpty = true;
+
+    if (equippableComp) {
+      for (const slot of Object.values(EquipmentSlot)) {
+        const equipment = equippableComp.getEquipment(slot);
+        if (equipment) {
+          areEquipmentSlotsEmpty = false;
+          break;
+        }
+      }
+    }
+
     if (!container) {
       showErrorMessage(viewer, {
         rawtext: [
@@ -130,11 +153,11 @@ function getContainer(viewer: Player, target: Entity | Block, targetEntities?: E
       return;
     }
 
-    if (container.emptySlotsCount === container.size) {
+    if (isContainerEmpty && areEquipmentSlotsEmpty) {
       showErrorMessage(viewer, {
         rawtext: [
           { translate: getName(target) },
-          { text: "'s inventory is empty." }
+          { text: " has no items." }
         ]
       }, () => (targetEntities?.length || 0) > 1 ? listEntities(viewer, targetEntities as Entity[]) : mainMenu(viewer));
       return;
@@ -181,51 +204,69 @@ function getContainer(viewer: Player, target: Entity | Block, targetEntities?: E
  * @param {Entity | Block} target - The target entity or block that the container belongs to.
  * @param {Entity[]} [targetEntities] - Optional array of entities related to the target selector.
  */
-function listItems(viewer: Player, container: Container, target: Entity | Block, targetEntities?: Entity[]) {
+function listItems(viewer: Player, container: Container | EntityEquippableComponent, target: Entity | Block, targetEntities?: Entity[]) {
   const menu = new ui.ActionFormData();
-  if (target instanceof Entity) {
-    menu.title({
-      rawtext: [
-        { translate: getName(target) },
-        { text: "'s Inventory - Item Editor" }
-      ]
-    });
-  } else if (target instanceof Block) {
-    menu.title({
-      rawtext: [
-        { translate: getName(target) },
-        { text: "'s Container - Item Editor" }
-      ]
-    });
-  }
+  const itemIndices: { type: 'container' | 'equippable', index: number }[] = [];
 
+  menu.title(target instanceof Entity ? `${getName(target)}'s Inventory - Item Editor` : `${getName(target)}'s Container - Item Editor`);
   menu.button("Go back");
 
-  for (let i = 0; i < container.size; i++) {
-    const item = container.getItem(i);
-    if (item) {
-      menu.button(getName(item));
+  const equippableComp = target.getComponent(EntityComponentTypes.Equippable) as EntityEquippableComponent;
+  if (equippableComp) {
+    for (const slot of Object.values(EquipmentSlot)) {
+      const equipment = equippableComp.getEquipment(slot);
+      if (equipment) {
+        menu.button(`${getName(equipment)} (Equipped)`);
+        itemIndices.push({ type: 'equippable', index: slot as unknown as number });
+      }
+    }
+  }
+
+  if (container instanceof Container) {
+    const mainhandItem = target instanceof Entity && equippableComp ? equippableComp.getEquipment(EquipmentSlot.Mainhand) : null;
+    for (let i = 0; i < container.size; i++) {
+      const item = container.getItem(i);
+      if (item) {
+        if (
+          mainhandItem &&
+          isSameItem(item, mainhandItem)
+        ) {
+          continue; 
+        }
+        menu.button(getName(item));
+        itemIndices.push({ type: 'container', index: i });
+      }
     }
   }
 
   menu.show(viewer).then((result: ui.ActionFormResponse) => {
     if (result.canceled || result.selection === undefined) return;
 
-    if (result.selection === 0 ) {
+    if (result.selection === 0) {
       if (targetEntities?.length || 0 > 1) {
         listEntities(viewer, targetEntities as Entity[]);
       } else {
         mainMenu(viewer);
       }
-    } else if (result.selection >= 1) {
-      const selectedSlot = result.selection - 1;
-      const selectedItem = container.getItem(selectedSlot);
-  
-      if (selectedItem) {
-        if (targetEntities?.length || 0 > 1) {
-          itemDetails(viewer, container, selectedItem, selectedSlot, target, targetEntities as Entity[]);
-        } else {
-          itemDetails(viewer, container, selectedItem, selectedSlot, target);
+    } else {
+      const selected = itemIndices[result.selection - 1];
+      if (selected.type === 'container' && container instanceof Container) {
+        const selectedItem = container.getItem(selected.index);
+        if (selectedItem) {
+          if (targetEntities?.length || 0 > 1) {
+            itemDetails(viewer, container, selectedItem, selected.index, target, false, targetEntities);
+          } else {
+            itemDetails(viewer, container, selectedItem, selected.index, target, false);
+          }
+        }
+      } else if (selected.type === 'equippable' && equippableComp) {
+        const selectedItem = equippableComp.getEquipment(selected.index as unknown as EquipmentSlot);
+        if (selectedItem) {
+          if (targetEntities?.length || 0 > 1) {
+            itemDetails(viewer, equippableComp, selectedItem, selected.index, target, true, targetEntities);
+          } else {
+            itemDetails(viewer, equippableComp, selectedItem, selected.index, target, true);
+          }
         }
       }
     }
@@ -241,28 +282,35 @@ function listItems(viewer: Player, container: Container, target: Entity | Block,
  * @param {ItemStack} item - The item to display details for.
  * @param {number} slotIndex - The index of the item in the container.
  * @param {Entity | Block} target - The target entity or block that the container belongs to.
+ * @param {boolean} isEquippable - Whether the item is from an equippable slot.
  * @param {Entity[]} [targetEntities] - Optional array of entities related to the target selector.
  */
-function itemDetails(viewer: Player, container: Container, item: ItemStack, slotIndex: number, target: Entity | Block, targetEntities?: Entity[]) {
+function itemDetails(viewer: Player, container: Container | EntityEquippableComponent, item: ItemStack, slotIndex: number, target: Entity | Block, isEquippable = false, targetEntities?: Entity[]) {
+  const title = isEquippable
+    ? `${formatSlotName(slotIndex as unknown as EquipmentSlot)} - Item Editor`
+    : `Slot ${slotIndex + 1} - Item Editor`;
+
   const menu = new ui.MessageFormData();
-  menu.title(`Slot ${slotIndex} Item Details - Item Editor`);
+  menu.title(title);
+
+  const durability = item.getComponent(ItemComponentTypes.Durability) as ItemDurabilityComponent;
 
   const rawText = [
     { text: `Item identifier: §7${item.typeId}§r\n` },
-    { text: `Is stackable: §7${item.isStackable}§r\n` },
-    { text: `In slot: §7${slotIndex + 1}§r\n` },
-    { text: `Amount in slot: §7${item.amount}§r\n` },
+    ...(item.nameTag ? [{ text: `Nametag: §7${item.nameTag}§r\n` }] : []),
+    ...(durability ? [{ text: `Durability: §7${durability.damage}§r/§7${durability.maxDurability}§r\n` }] : []),
+    ...(!isEquippable ? [
+      { text: `In slot: §7${slotIndex + 1}§r\n` }
+    ] : [
+      { text: `In slot: §7${formatSlotName(slotIndex as unknown as EquipmentSlot)}§r\n` }
+    ]),
+    ...(item.isStackable ? [
+      { text: `Amount: §7${item.amount}§r\n` }
+    ] : [
+      { text: `Is unbreakable: §7${item.getDynamicProperty("item_editor:unbreakable") ? 'true' : 'false'}§r\n` }
+    ]),
     { text: `Is a block: §7${BlockTypes.get(item.typeId) ? 'true' : 'false'}§r\n` }
   ];
-
-  if (item.nameTag) {
-    rawText.push({ text: `Nametag: §7${item.nameTag}§r\n` });
-  }
-
-  const durability = item.getComponent(ItemComponentTypes.Durability) as ItemDurabilityComponent;
-  if (durability) {
-    rawText.push({ text: `Durability: §7${durability.damage}§r/§7${durability.maxDurability}§r\n` });
-  }
 
   rawText.push({ text: `Keep on death: §7${item.keepOnDeath}§r\n` });
   rawText.push({ text: `Lock Mode: §7${item.lockMode}§r\n` });
@@ -299,6 +347,7 @@ function itemDetails(viewer: Player, container: Container, item: ItemStack, slot
   }
 
   menu.body({ rawtext: rawText });
+
   menu.button1("Edit Item");
   menu.button2("Go back");
 
@@ -307,13 +356,13 @@ function itemDetails(viewer: Player, container: Container, item: ItemStack, slot
 
     if (result.selection === 0) {
       if (targetEntities?.length || 0 > 1) {
-        editItemDetails(viewer, item, container, slotIndex, target, targetEntities as Entity[]);
+        editItemDetails(viewer, item, container, slotIndex, target, isEquippable, targetEntities);
       } else {
-        editItemDetails(viewer, item, container, slotIndex, target);
+        editItemDetails(viewer, item, container, slotIndex, target, isEquippable);
       }
     } else if (result.selection === 1) {
       if (targetEntities?.length || 0 > 1) {
-        listItems(viewer, container, target, targetEntities as Entity[]);
+        listItems(viewer, container, target, targetEntities);
       } else {
         listItems(viewer, container, target);
       }
@@ -328,12 +377,13 @@ function itemDetails(viewer: Player, container: Container, item: ItemStack, slot
  *
  * @param {Player} viewer - The player to display the menu to.
  * @param {ItemStack} item - The item to edit.
- * @param {Container} container - The container holding the items, will be used to get or set items.
+ * @param {Container | EntityEquippableComponent} container - The container holding the items, will be used to get or set items.
  * @param {number} slotIndex - The index of the item in the container.
  * @param {Entity | Block} target - The target entity or block that the container belongs to.
+ * @param {boolean} isEquippable - Whether the item is an equippable item.
  * @param {Entity[]} [targetEntities] - Optional array of entities related to the target selector.
  */
-function editItemDetails(viewer: Player, item: ItemStack, container: Container, slotIndex: number, target: Entity | Block, targetEntities?: Entity[]) {
+function editItemDetails(viewer: Player, item: ItemStack, container: Container | EntityEquippableComponent, slotIndex: number, target: Entity | Block, isEquippable = false, targetEntities?: Entity[]) {
   const editForm = new ui.ModalFormData();
   editForm.title("Edit Item - Item Editor");
 
@@ -355,6 +405,11 @@ function editItemDetails(viewer: Player, item: ItemStack, container: Container, 
 
   formManager.addField('keepOnDeath');
   editForm.toggle("Keep on death", item.keepOnDeath);
+
+  if (!item.isStackable) {
+    formManager.addField('unbreakable');
+    editForm.toggle("Unbreakable", item.getDynamicProperty("item_editor:unbreakable") as boolean || false);
+  }
 
   const lockModeIndices: Record<ItemLockMode, number> = {
     [ItemLockMode.slot]: 0,
@@ -391,6 +446,7 @@ function editItemDetails(viewer: Player, item: ItemStack, container: Container, 
       const amount = formManager.getValue(response, 'amount', item.amount);
       const durabilityValue = formManager.getValue(response, 'durability', durabilityComponent ? durabilityComponent.damage : 0);
       const keepOnDeath = formManager.getValue(response, 'keepOnDeath', item.keepOnDeath);
+      const isUnbreakable = formManager.getValue(response, 'unbreakable', item.getDynamicProperty("item_editor:unbreakable") as boolean || false);
       const lockModeIndex = formManager.getValue(response, 'lockMode', defaultLockModeValue);
       const loreInput = formManager.getValue(response, 'lore', item.getLore().join('<b>'));
       const enchantmentsInput = formManager.getValue(response, 'enchantments', currentEnchantments);
@@ -405,6 +461,13 @@ function editItemDetails(viewer: Player, item: ItemStack, container: Container, 
       item.keepOnDeath = keepOnDeath;
       item.lockMode = Object.keys(lockModeIndices)[lockModeIndex] as ItemLockMode;
 
+      if (isUnbreakable) {
+        durabilityComponent.damage = 0;
+        item.setDynamicProperty("item_editor:unbreakable", true);
+      } else {
+        item.setDynamicProperty("item_editor:unbreakable", undefined);
+      }
+
       const loreLines = loreInput.split('<b>').map((line) => line.trim()).filter(line => line !== '');
       item.setLore(loreLines);
 
@@ -416,9 +479,9 @@ function editItemDetails(viewer: Player, item: ItemStack, container: Container, 
             if (newEnchantments.enchantments?.length === 0) return;
             if (newEnchantments.error) {
               if (targetEntities?.length || 0 > 1) {
-                showErrorMessage(viewer, newEnchantments.error, () => itemDetails(viewer, container, item, slotIndex, target, targetEntities as Entity[]));
+                showErrorMessage(viewer, newEnchantments.error, () => itemDetails(viewer, container, item, slotIndex, target, isEquippable, targetEntities));
               } else {
-                showErrorMessage(viewer, newEnchantments.error, () => itemDetails(viewer, container, item, slotIndex, target));
+                showErrorMessage(viewer, newEnchantments.error, () => itemDetails(viewer, container, item, slotIndex, target, isEquippable));
               }
 
               return;
@@ -430,9 +493,9 @@ function editItemDetails(viewer: Player, item: ItemStack, container: Container, 
         } catch (error) {
           const errorMessage = (error instanceof Error) ? error.message : 'Unknown error occurred';
           if (targetEntities?.length || 0 > 1) {
-            showErrorMessage(viewer, `Failed to edit enchantments: ${errorMessage}`, () => itemDetails(viewer, container, item, slotIndex, target, targetEntities as Entity[]));
+            showErrorMessage(viewer, `Failed to edit enchantments: ${errorMessage}`, () => itemDetails(viewer, container, item, slotIndex, target, isEquippable, targetEntities));
           } else {
-            showErrorMessage(viewer, `Failed to edit enchantments: ${errorMessage}`, () => itemDetails(viewer, container, item, slotIndex, target));
+            showErrorMessage(viewer, `Failed to edit enchantments: ${errorMessage}`, () => itemDetails(viewer, container, item, slotIndex, target, isEquippable));
           }
           return;
         }
@@ -445,9 +508,9 @@ function editItemDetails(viewer: Player, item: ItemStack, container: Container, 
           validCanDestroyBlocks.push(block);
         } else {
           if (targetEntities?.length || 0 > 1) {
-            showErrorMessage(viewer, `Block type "${block}" is invalid, cannot be added to "Can Destroy" list.`, () => itemDetails(viewer, container, item, slotIndex, target, targetEntities as Entity[]));
+            showErrorMessage(viewer, `Block type "${block}" is invalid, cannot be added to "Can Destroy" list.`, () => itemDetails(viewer, container, item, slotIndex, target, isEquippable, targetEntities));
           } else {
-            showErrorMessage(viewer, `Block type "${block}" is invalid, cannot be added to "Can Destroy" list.`, () => itemDetails(viewer, container, item, slotIndex, target));
+            showErrorMessage(viewer, `Block type "${block}" is invalid, cannot be added to "Can Destroy" list.`, () => itemDetails(viewer, container, item, slotIndex, target, isEquippable));
           }
           return;
         }
@@ -461,21 +524,25 @@ function editItemDetails(viewer: Player, item: ItemStack, container: Container, 
           validCanPlaceOnBlocks.push(block);
         } else {
           if (targetEntities?.length || 0 > 1) {
-            showErrorMessage(viewer, `Block type "${block}" is invalid, cannot be added to "Can Place On" list.`, () => itemDetails(viewer, container, item, slotIndex, target, targetEntities as Entity[]));
+            showErrorMessage(viewer, `Block type "${block}" is invalid, cannot be added to "Can Place On" list.`, () => itemDetails(viewer, container, item, slotIndex, target, isEquippable, targetEntities));
           } else {
-            showErrorMessage(viewer, `Block type "${block}" is invalid, cannot be added to "Can Place On" list.`, () => itemDetails(viewer, container, item, slotIndex, target));
+            showErrorMessage(viewer, `Block type "${block}" is invalid, cannot be added to "Can Place On" list.`, () => itemDetails(viewer, container, item, slotIndex, target, isEquippable));
           }
           return;
         }
       }
       item.setCanPlaceOn(validCanPlaceOnBlocks);
 
-      container.setItem(slotIndex, item);
+      if (isEquippable && container instanceof EntityEquippableComponent) {
+        container.setEquipment(slotIndex as unknown as EquipmentSlot, item);
+      } else if (!isEquippable && container instanceof Container) {
+        container.setItem(slotIndex, item);
+      }
 
       if (targetEntities?.length || 0 > 1) {
-        itemDetails(viewer, container, item, slotIndex, target, targetEntities as Entity[]);
+        itemDetails(viewer, container, item, slotIndex, target, isEquippable, targetEntities);
       } else {
-        itemDetails(viewer, container, item, slotIndex, target);
+        itemDetails(viewer, container, item, slotIndex, target, isEquippable);
       }
     }
   });
@@ -512,4 +579,60 @@ system.afterEvents.scriptEventReceive.subscribe((eventData: ScriptEventCommandMe
     const player = eventData.sourceEntity as Player;
     mainMenu(player);
   }
-});
+})
+
+function onTick() {
+  for (const player of world.getPlayers()) {
+    if (player.getGameMode() === GameMode.creative) continue;
+
+    const inventory = player.getComponent(EntityComponentTypes.Inventory) as EntityInventoryComponent;
+    const equippable = player.getComponent(EntityComponentTypes.Equippable) as EntityEquippableComponent;
+    const container = inventory.container as Container;
+
+    const containerSize = container.size;
+
+    for (let i = 0; i < containerSize; i++) {
+      const item = container.getItem(i);
+
+      if (item && item.getDynamicProperty("item_editor:unbreakable")) {
+        const durability = item.getComponent(ItemComponentTypes.Durability) as ItemDurabilityComponent;
+        if (durability && durability.damage > 0) {
+          if (i !== player.selectedSlotIndex) {
+            durability.damage = 0;
+            container.setItem(i, item);
+            console.warn(`Reverted durability of item in slot ${i} to 0`);
+          }
+        }
+      }
+    }
+
+    if (equippable) {
+      for (const slot of Object.values(EquipmentSlot)) {
+        const equipment = equippable.getEquipment(slot);
+        if (equipment && equipment.getDynamicProperty("item_editor:unbreakable")) {
+          const durability = equipment.getComponent(ItemComponentTypes.Durability) as ItemDurabilityComponent;
+          if (
+            (slot === EquipmentSlot.Head || 
+             slot === EquipmentSlot.Chest || 
+             slot === EquipmentSlot.Legs || 
+             slot === EquipmentSlot.Feet) &&
+            durability && 
+            durability.damage >= durability.maxDurability - 10
+          ) {
+            durability.damage = 0;
+            equippable.setEquipment(slot, equipment);
+          } else if (
+            (slot === EquipmentSlot.Mainhand || 
+             slot === EquipmentSlot.Offhand) &&
+            durability && 
+            durability.damage > 0
+          ) {
+            durability.damage = 0;
+            equippable.setEquipment(slot, equipment);
+          }
+        }
+      }
+    }
+  }
+}
+system.runInterval(onTick, tickDelay);

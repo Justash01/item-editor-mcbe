@@ -1,4 +1,4 @@
-import { world, Block, Player, Entity, ItemStack, Enchantment, EnchantmentTypes, ItemComponentTypes, ItemEnchantableComponent } from "@minecraft/server";
+import { world, Block, Player, Entity, ItemStack, Enchantment, EquipmentSlot, EnchantmentTypes, ItemComponentTypes, ItemCooldownComponent, ItemFoodComponent, ItemDurabilityComponent, ItemEnchantableComponent } from "@minecraft/server";
 import * as ui from "@minecraft/server-ui";
 
 /**
@@ -95,6 +95,16 @@ export class Vector3 {
     this.x = x;
     this.y = y;
     this.z = z;
+  }
+
+  /**
+   * Checks if this vector is equal to another vector.
+   *
+   * @param {Vector3} other - The other vector to compare.
+   * @returns {boolean} - True if vectors are equal, false otherwise.
+   */
+  equals(other: Vector3): boolean {
+    return this.x === other.x && this.y === other.y && this.z === other.z;
   }
 
   /**
@@ -459,4 +469,159 @@ export function parseCoordinateWithDirection(player: Player, input: string, base
 
   const absoluteValue = parseFloat(input);
   return isNaN(absoluteValue) ? "Error: Invalid coordinate value." : absoluteValue;
+}
+
+
+/**
+ * Checks if two items are the same, considering various properties such as type, name tag, amount, and components.
+ *
+ * @param {ItemStack} item1 - The first item to compare.
+ * @param {ItemStack} item2 - The second item to compare.
+ * @returns {boolean} - Whether the two items are the same.
+ */
+export function isSameItem(item1: ItemStack, item2: ItemStack): boolean {
+  if (item1.typeId !== item2.typeId) return false;
+  if (item1.nameTag !== item2.nameTag) return false;
+  if (item1.amount !== item2.amount) return false;
+  if (item1.isStackable && item1.isStackableWith(item2)) return false;
+  if (item1.getTags().length !== item2.getTags().length || !item1.getTags().every((tag) => item2.getTags().includes(tag))) return false;
+  if (item1.getLore().length !== item2.getLore().length || !item1.getLore().every((lore) => item2.getLore().includes(lore))) return false;
+  if (item1.getCanDestroy().length !== item2.getCanDestroy().length || !item1.getCanDestroy().every((block) => item2.getCanDestroy().includes(block))) return false;
+  if (item1.getCanPlaceOn().length !== item2.getCanPlaceOn().length || !item1.getCanPlaceOn().every((block) => item2.getCanPlaceOn().includes(block))) return false;
+  if (item1.keepOnDeath !== item2.keepOnDeath) return false;
+  if (item1.lockMode !== item2.lockMode) return false;
+  if (!compareComponents(item1, item2)) return false;
+  if (!compareDynamicProperties(item1, item2)) return false;
+  return true;
+}
+
+/**
+ * Compare various components between two items, including cooldown, durability, food, and enchantable.
+ */
+function compareComponents(item1: ItemStack, item2: ItemStack): boolean {
+  if (!compareComponent(item1, item2, ItemComponentTypes.Cooldown, compareCooldownComponents)) return false;
+  if (!compareComponent(item1, item2, ItemComponentTypes.Durability, compareDurabilityComponents)) return false;
+  if (!compareComponent(item1, item2, ItemComponentTypes.Food, compareFoodComponents)) return false;
+  if (!compareComponent(item1, item2, ItemComponentTypes.Enchantable, compareEnchantableComponents)) return false;
+
+  return true;
+}
+
+/**
+ * Helper function to compare a specific component between two items.
+ */
+function compareComponent(
+  item1: ItemStack,
+  item2: ItemStack,
+  componentType: string,
+  compareFunction: (comp1: any, comp2: any) => boolean
+): boolean {
+  const hasComponent1 = item1.hasComponent(componentType);
+  const hasComponent2 = item2.hasComponent(componentType);
+  if (hasComponent1 !== hasComponent2) return false;
+  if (hasComponent1 && hasComponent2) {
+    const comp1 = item1.getComponent(componentType);
+    const comp2 = item2.getComponent(componentType);
+    return compareFunction(comp1, comp2);
+  }
+  return true;
+}
+
+/**
+ * Compare cooldown components between two items.
+ */
+function compareCooldownComponents(comp1: ItemCooldownComponent, comp2: ItemCooldownComponent): boolean {
+  return comp1.cooldownCategory === comp2.cooldownCategory && comp1.cooldownTicks === comp2.cooldownTicks;
+}
+
+/**
+ * Compare durability components between two items.
+ */
+function compareDurabilityComponents(comp1: ItemDurabilityComponent, comp2: ItemDurabilityComponent): boolean {
+  return comp1.maxDurability === comp2.maxDurability && comp1.damage === comp2.damage;
+}
+
+/**
+ * Compare food components between two items.
+ */
+function compareFoodComponents(comp1: ItemFoodComponent, comp2: ItemFoodComponent): boolean {
+  return (
+    comp1.canAlwaysEat === comp2.canAlwaysEat &&
+    comp1.nutrition === comp2.nutrition &&
+    comp1.saturationModifier === comp2.saturationModifier &&
+    comp1.usingConvertsTo === comp2.usingConvertsTo
+  );
+}
+
+/**
+ * Compare enchantable components between two items.
+ */
+function compareEnchantableComponents(comp1: ItemEnchantableComponent, comp2: ItemEnchantableComponent): boolean {
+  const enchantments1 = comp1.getEnchantments();
+  const enchantments2 = comp2.getEnchantments();
+  if (enchantments1.length !== enchantments2.length) return false;
+  for (let i = 0; i < enchantments1.length; i++) {
+    if (enchantments1[i].type !== enchantments2[i].type || enchantments1[i].level !== enchantments2[i].level) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Compare dynamic properties between two items, including Vector3 comparisons.
+ */
+function compareDynamicProperties(item1: ItemStack, item2: ItemStack): boolean {
+  const item1DynamicProperties = item1.getDynamicPropertyIds();
+  const item2DynamicProperties = item2.getDynamicPropertyIds();
+  if (!arraysEqual(item1DynamicProperties, item2DynamicProperties)) return false;
+
+  for (const property of item1DynamicProperties) {
+    const prop1 = item1.getDynamicProperty(property);
+    const prop2 = item2.getDynamicProperty(property);
+
+    if (typeof prop1 !== typeof prop2) return false;
+
+    if (prop1 instanceof Vector3 && prop2 instanceof Vector3) {
+      if (!prop1.equals(prop2)) return false;
+    } else if (prop1 !== prop2) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Adds an equality check method to Vector3 for cleaner comparisons.
+ */
+Vector3.prototype.equals = function (other: Vector3): boolean {
+  return this.x === other.x && this.y === other.y && this.z === other.z;
+}
+
+/**
+ * Helper function to compare two arrays for equality.
+ */
+function arraysEqual(arr1: any[], arr2: any[]): boolean {
+  if (arr1.length !== arr2.length) return false;
+  return arr1.every((item, index) => item === arr2[index]);
+};
+
+/**
+ * Formats equipment slot names.
+ * Converts slot names like "Mainhand" to "Main hand".
+ *
+ * @param {EquipmentSlot} slot - The equipment slot to format.
+ * @returns {string} - A formatted slot name.
+ */
+export function formatSlotName(slot: EquipmentSlot): string {
+  const slotNames: Record<EquipmentSlot, string> = {
+    [EquipmentSlot.Mainhand]: "Main hand",
+    [EquipmentSlot.Offhand]: "Off hand",
+    [EquipmentSlot.Head]: "Head",
+    [EquipmentSlot.Chest]: "Chest",
+    [EquipmentSlot.Legs]: "Legs",
+    [EquipmentSlot.Feet]: "Feet",
+  };
+  return slotNames[slot] || "Unknown Slot";
 }
