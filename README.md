@@ -28,3 +28,9 @@ This project provides an add-on for Minecraft Bedrock Edition that allows direct
    /scriptevent item:editor
    ```
 4. Continue using the editor through the in-game GUI.
+
+![image](https://github.com/user-attachments/assets/82276735-3857-427f-9bbe-f1ebfc6a7e99)
+![image](https://github.com/user-attachments/assets/61202af9-71a8-4552-bc7e-b419a71f781f)
+![image](https://github.com/user-attachments/assets/93508d34-cae1-43bc-835d-92f422c2bc62)
+
+
