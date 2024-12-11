@@ -1,0 +1,46 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Bedrock-OSS/regolith-schemas/main/config/v1.1.json",
+  "author": "JustAsh01",
+  "name": "item-editor-mcpe",
+  "packs": {
+    "behaviorPack": "./behavior_pack",
+    "resourcePack": "./resource_pack"
+  },
+  "regolith": {
+    "dataPath": "./data",
+    "filterDefinitions": {
+      "esbuild": {
+        "url": "github.com/ink0rr/regolith-filters",
+        "version": "0.1.0"
+      }
+    },
+    "profiles": {
+      "default": {
+        "export": {
+          "target": "development"
+        },
+        "filters": [
+          {
+            "filter": "esbuild",
+            "settings": {
+              "entryPoints": [
+                "data/scripts/main.ts"
+              ],
+              "minify": false
+            }
+          }
+        ]
+      },
+      "build": {
+        "export": {
+          "target": "local"
+        },
+        "filters": [
+          {
+            "profile": "default"
+          }
+        ]
+      }
+    }
+  }
+}
