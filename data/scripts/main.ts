@@ -9,7 +9,7 @@
 
 import { RawText, Block, ItemStack, ItemComponentTypes, ScriptEventCommandMessageAfterEvent, system, ItemLockMode, Player, Entity, EntityComponentTypes, Container, EntityInventoryComponent, Enchantment, BlockComponentTypes, BlockInventoryComponent, ItemDurabilityComponent, ItemEnchantableComponent, ItemFoodComponent, BlockTypes, world, GameMode, EntityEquippableComponent, EquipmentSlot } from "@minecraft/server";
 import * as ui from "@minecraft/server-ui";
-import { Vector3, parseCoords, parseSelector, isSameItem, getName, parseEnchantments, formatSlotName, convertToRomanNumerals, idToName, FormFieldManager } from "./utils";
+import { Vector3, parseCoords, parseSelector, isSameItem, getName, parseEnchantments, formatSlotName, convertToRomanNumerals, idToName, FormFieldManager, getTargetEntitiesArgument } from "./utils";
 
 /**
  * This will run onTick function every tick (20 ticks = 1 second)
@@ -17,6 +17,12 @@ import { Vector3, parseCoords, parseSelector, isSameItem, getName, parseEnchantm
  * Though do note that it will then affect how often item's durability is reverted.
 */
 var tickDelay = 1;
+
+/**
+ * Command to open the item editor.
+ * Edit this if you want to change the id of script event which brings up the item editor.
+*/
+var scriptEventId = "item:editor";
 
 /**
  * Main menu for the item editor.
@@ -38,7 +44,6 @@ function mainMenu(viewer: Player) {
     if (sourceType === 0) {
       let targetSelector = result.formValues?.[1] as string;
       if (!targetSelector) {
-        //showErrorMessage(viewer, "No target selector was provided.", () => mainMenu(viewer));
         targetSelector = "@s";
       }
       const selector = parseSelector(viewer, targetSelector);
@@ -163,11 +168,7 @@ function getContainer(viewer: Player, target: Entity | Block, targetEntities?: E
       return;
     }
 
-    if (targetEntities?.length || 0 > 1) {
-      listItems(viewer, container, target, targetEntities);
-    } else {
-      listItems(viewer, container, target);
-    }
+    listItems(viewer, container, target, ...getTargetEntitiesArgument(targetEntities));
   } else if (target instanceof Block) {
     const inventoryComp = target.getComponent(BlockComponentTypes.Inventory) as BlockInventoryComponent;
     const container = inventoryComp?.container as Container;
@@ -253,20 +254,12 @@ function listItems(viewer: Player, container: Container | EntityEquippableCompon
       if (selected.type === 'container' && container instanceof Container) {
         const selectedItem = container.getItem(selected.index);
         if (selectedItem) {
-          if (targetEntities?.length || 0 > 1) {
-            itemDetails(viewer, container, selectedItem, selected.index, target, false, targetEntities);
-          } else {
-            itemDetails(viewer, container, selectedItem, selected.index, target, false);
-          }
+          itemActionMenu(viewer, container, selectedItem, selected.index, target, false, ...getTargetEntitiesArgument(targetEntities));
         }
       } else if (selected.type === 'equippable' && equippableComp) {
         const selectedItem = equippableComp.getEquipment(selected.index as unknown as EquipmentSlot);
         if (selectedItem) {
-          if (targetEntities?.length || 0 > 1) {
-            itemDetails(viewer, equippableComp, selectedItem, selected.index, target, true, targetEntities);
-          } else {
-            itemDetails(viewer, equippableComp, selectedItem, selected.index, target, true);
-          }
+          itemActionMenu(viewer, equippableComp, selectedItem, selected.index, target, true, ...getTargetEntitiesArgument(targetEntities));
         }
       }
     }
@@ -285,7 +278,79 @@ function listItems(viewer: Player, container: Container | EntityEquippableCompon
  * @param {boolean} isEquippable - Whether the item is from an equippable slot.
  * @param {Entity[]} [targetEntities] - Optional array of entities related to the target selector.
  */
-function itemDetails(viewer: Player, container: Container | EntityEquippableComponent, item: ItemStack, slotIndex: number, target: Entity | Block, isEquippable = false, targetEntities?: Entity[]) {
+function itemActionMenu(viewer: Player, container: Container | EntityEquippableComponent, item: ItemStack, slotIndex: number, target: Entity | Block, isEquippable = false, targetEntities?: Entity[]) {
+  const title = isEquippable
+    ? `${formatSlotName(slotIndex as unknown as EquipmentSlot)} - Item Editor`
+    : `Slot ${slotIndex + 1} - Item Editor`;
+
+  const menu = new ui.ActionFormData();
+  menu.title(title);
+
+  const rawText = [
+    { text: `Item identifier: §7${item.typeId}§r\n` }
+  ];
+
+  menu.body({ rawtext: rawText });
+
+  menu.button("Go back");
+  menu.button("Item Details");
+  menu.button("Edit Item");
+  menu.button("Duplicate Item");
+  menu.button("Reset Item");
+
+  menu.show(viewer).then((result: ui.ActionFormResponse) => {
+    if (result.canceled || result.selection === undefined) return;
+
+    if (result.selection === 0) {
+      listItems(viewer, container, target, ...getTargetEntitiesArgument(targetEntities));
+    } else if (result.selection === 1) {
+      itemDetails(viewer, item, container, slotIndex, target, isEquippable, ...getTargetEntitiesArgument(targetEntities));
+    } else if (result.selection === 2) {
+      editItemProperties(viewer, item, container, slotIndex, target, isEquippable, ...getTargetEntitiesArgument(targetEntities));
+    } else if (result.selection === 3) {
+      const duplicatedItem = isEquippable && container instanceof EntityEquippableComponent
+        ? container.getEquipment(slotIndex as unknown as EquipmentSlot)?.clone() as ItemStack
+        : !isEquippable && container instanceof Container
+        ? container.getItem(slotIndex)?.clone() as ItemStack
+        : null;
+
+      if (duplicatedItem) {
+        if (target instanceof Entity) {
+          const inventoryComp = target.getComponent(EntityComponentTypes.Inventory) as EntityInventoryComponent;
+          inventoryComp?.container?.addItem(duplicatedItem);
+        } else if (target instanceof Block) {
+          const blockContainer = target.getComponent(BlockComponentTypes.Inventory) as BlockInventoryComponent;
+          blockContainer?.container?.addItem(duplicatedItem);
+        }
+      }
+
+      listItems(viewer, container, target, ...getTargetEntitiesArgument(targetEntities));
+    } else if (result.selection === 4) {
+      if (isEquippable && container instanceof EntityEquippableComponent) {
+        container.setEquipment(slotIndex as unknown as EquipmentSlot, new ItemStack(item.typeId));
+      } else if (!isEquippable && container instanceof Container) {
+        container.setItem(slotIndex, new ItemStack(item.typeId));
+      }
+
+      listItems(viewer, container, target, ...getTargetEntitiesArgument(targetEntities));
+    }
+  });
+}
+
+/**
+ * Item Details menu.
+ * Displays a modal form menu with the item's details (identifier, nametag, durability, amount, keep on death, lock mode, lore, enchantments, can destroy/can place on blocks).
+ * Viewers can also delete the item using this menu.
+ *
+ * @param {Player} viewer - The player to display the menu to.
+ * @param {ItemStack} item - The item to display the details of.
+ * @param {Container | EntityEquippableComponent} container - The container holding the items, will be used to get or set items.
+ * @param {number} slotIndex - The index of the item in the container.
+ * @param {Entity | Block} target - The target entity or block that the container belongs to.
+ * @param {boolean} isEquippable - Whether the item is an equippable item.
+ * @param {Entity[]} [targetEntities] - Optional array of entities related to the target selector.
+ */
+function itemDetails(viewer: Player, item: ItemStack, container: Container | EntityEquippableComponent, slotIndex: number, target: Entity | Block, isEquippable: boolean, targetEntities?: Entity[]) {
   const title = isEquippable
     ? `${formatSlotName(slotIndex as unknown as EquipmentSlot)} - Item Editor`
     : `Slot ${slotIndex + 1} - Item Editor`;
@@ -347,25 +412,23 @@ function itemDetails(viewer: Player, container: Container | EntityEquippableComp
   }
 
   menu.body({ rawtext: rawText });
-
-  menu.button1("Edit Item");
+  
+  menu.button1("Delete Item");
   menu.button2("Go back");
 
   menu.show(viewer).then((result: ui.MessageFormResponse) => {
     if (result.canceled || result.selection === undefined) return;
 
     if (result.selection === 0) {
-      if (targetEntities?.length || 0 > 1) {
-        editItemDetails(viewer, item, container, slotIndex, target, isEquippable, targetEntities);
-      } else {
-        editItemDetails(viewer, item, container, slotIndex, target, isEquippable);
+      if (isEquippable && container instanceof EntityEquippableComponent) {
+        container.setEquipment(slotIndex as unknown as EquipmentSlot, undefined);
+      } else if (!isEquippable && container instanceof Container) {
+        container.setItem(slotIndex, undefined);
       }
+
+      listItems(viewer, container, target, ...getTargetEntitiesArgument(targetEntities));
     } else if (result.selection === 1) {
-      if (targetEntities?.length || 0 > 1) {
-        listItems(viewer, container, target, targetEntities);
-      } else {
-        listItems(viewer, container, target);
-      }
+      itemActionMenu(viewer, container, item, slotIndex, target, isEquippable, ...getTargetEntitiesArgument(targetEntities));
     }
   });
 }
@@ -383,7 +446,7 @@ function itemDetails(viewer: Player, container: Container | EntityEquippableComp
  * @param {boolean} isEquippable - Whether the item is an equippable item.
  * @param {Entity[]} [targetEntities] - Optional array of entities related to the target selector.
  */
-function editItemDetails(viewer: Player, item: ItemStack, container: Container | EntityEquippableComponent, slotIndex: number, target: Entity | Block, isEquippable = false, targetEntities?: Entity[]) {
+function editItemProperties(viewer: Player, item: ItemStack, container: Container | EntityEquippableComponent, slotIndex: number, target: Entity | Block, isEquippable = false, targetEntities?: Entity[]) {
   const editForm = new ui.ModalFormData();
   editForm.title("Edit Item - Item Editor");
 
@@ -462,9 +525,10 @@ function editItemDetails(viewer: Player, item: ItemStack, container: Container |
       item.lockMode = Object.keys(lockModeIndices)[lockModeIndex] as ItemLockMode;
 
       if (isUnbreakable) {
-        durabilityComponent.damage = 0;
+        item.setDynamicProperty("item_editor:current_damage", durabilityComponent.damage);
         item.setDynamicProperty("item_editor:unbreakable", true);
       } else {
+        item.setDynamicProperty("item_editor:current_damage", undefined);
         item.setDynamicProperty("item_editor:unbreakable", undefined);
       }
 
@@ -478,12 +542,7 @@ function editItemDetails(viewer: Player, item: ItemStack, container: Container |
             const newEnchantments = parseEnchantments(item, enchantmentsInput);
             if (newEnchantments.enchantments?.length === 0) return;
             if (newEnchantments.error) {
-              if (targetEntities?.length || 0 > 1) {
-                showErrorMessage(viewer, newEnchantments.error, () => itemDetails(viewer, container, item, slotIndex, target, isEquippable, targetEntities));
-              } else {
-                showErrorMessage(viewer, newEnchantments.error, () => itemDetails(viewer, container, item, slotIndex, target, isEquippable));
-              }
-
+              showErrorMessage(viewer, newEnchantments.error, () => itemActionMenu(viewer, container, item, slotIndex, target, isEquippable, ...getTargetEntitiesArgument(targetEntities)));
               return;
             }
             enchantable.addEnchantments(newEnchantments.enchantments as Enchantment[]);
@@ -492,11 +551,7 @@ function editItemDetails(viewer: Player, item: ItemStack, container: Container |
           }
         } catch (error) {
           const errorMessage = (error instanceof Error) ? error.message : 'Unknown error occurred';
-          if (targetEntities?.length || 0 > 1) {
-            showErrorMessage(viewer, `Failed to edit enchantments: ${errorMessage}`, () => itemDetails(viewer, container, item, slotIndex, target, isEquippable, targetEntities));
-          } else {
-            showErrorMessage(viewer, `Failed to edit enchantments: ${errorMessage}`, () => itemDetails(viewer, container, item, slotIndex, target, isEquippable));
-          }
+          showErrorMessage(viewer, `Failed to edit enchantments: ${errorMessage}`, () => itemActionMenu(viewer, container, item, slotIndex, target, isEquippable, ...getTargetEntitiesArgument(targetEntities)));
           return;
         }
       }
@@ -507,11 +562,7 @@ function editItemDetails(viewer: Player, item: ItemStack, container: Container |
         if (BlockTypes.get(block)) {
           validCanDestroyBlocks.push(block);
         } else {
-          if (targetEntities?.length || 0 > 1) {
-            showErrorMessage(viewer, `Block type "${block}" is invalid, cannot be added to "Can Destroy" list.`, () => itemDetails(viewer, container, item, slotIndex, target, isEquippable, targetEntities));
-          } else {
-            showErrorMessage(viewer, `Block type "${block}" is invalid, cannot be added to "Can Destroy" list.`, () => itemDetails(viewer, container, item, slotIndex, target, isEquippable));
-          }
+          showErrorMessage(viewer, `Block type "${block}" is invalid, cannot be added to "Can Destroy" list.`, () => itemActionMenu(viewer, container, item, slotIndex, target, isEquippable, ...getTargetEntitiesArgument(targetEntities)));
           return;
         }
       }
@@ -523,11 +574,7 @@ function editItemDetails(viewer: Player, item: ItemStack, container: Container |
         if (BlockTypes.get(block)) {
           validCanPlaceOnBlocks.push(block);
         } else {
-          if (targetEntities?.length || 0 > 1) {
-            showErrorMessage(viewer, `Block type "${block}" is invalid, cannot be added to "Can Place On" list.`, () => itemDetails(viewer, container, item, slotIndex, target, isEquippable, targetEntities));
-          } else {
-            showErrorMessage(viewer, `Block type "${block}" is invalid, cannot be added to "Can Place On" list.`, () => itemDetails(viewer, container, item, slotIndex, target, isEquippable));
-          }
+          showErrorMessage(viewer, `Block type "${block}" is invalid, cannot be added to "Can Place On" list.`, () => itemActionMenu(viewer, container, item, slotIndex, target, isEquippable, ...getTargetEntitiesArgument(targetEntities)));
           return;
         }
       }
@@ -539,11 +586,7 @@ function editItemDetails(viewer: Player, item: ItemStack, container: Container |
         container.setItem(slotIndex, item);
       }
 
-      if (targetEntities?.length || 0 > 1) {
-        itemDetails(viewer, container, item, slotIndex, target, isEquippable, targetEntities);
-      } else {
-        itemDetails(viewer, container, item, slotIndex, target, isEquippable);
-      }
+      itemActionMenu(viewer, container, item, slotIndex, target, isEquippable, ...getTargetEntitiesArgument(targetEntities));
     }
   });
 }
@@ -575,7 +618,7 @@ function showErrorMessage(viewer: Player, message: RawText | string, previousMen
 }
 
 system.afterEvents.scriptEventReceive.subscribe((eventData: ScriptEventCommandMessageAfterEvent) => {
-  if (eventData.id === "item:editor") {
+  if (eventData.id === scriptEventId) {
     const player = eventData.sourceEntity as Player;
     mainMenu(player);
   }
@@ -585,54 +628,38 @@ function onTick() {
   for (const player of world.getPlayers()) {
     if (player.getGameMode() === GameMode.creative) continue;
 
-    const inventory = player.getComponent(EntityComponentTypes.Inventory) as EntityInventoryComponent;
     const equippable = player.getComponent(EntityComponentTypes.Equippable) as EntityEquippableComponent;
-    const container = inventory.container as Container;
-
-    const containerSize = container.size;
-
-    for (let i = 0; i < containerSize; i++) {
-      const item = container.getItem(i);
-
-      if (item && item.getDynamicProperty("item_editor:unbreakable")) {
-        const durability = item.getComponent(ItemComponentTypes.Durability) as ItemDurabilityComponent;
-        if (durability && durability.damage > 0) {
-          if (i !== player.selectedSlotIndex) {
-            durability.damage = 0;
-            container.setItem(i, item);
-            console.warn(`Reverted durability of item in slot ${i} to 0`);
-          }
-        }
-      }
-    }
 
     if (equippable) {
       for (const slot of Object.values(EquipmentSlot)) {
         const equipment = equippable.getEquipment(slot);
         if (equipment && equipment.getDynamicProperty("item_editor:unbreakable")) {
           const durability = equipment.getComponent(ItemComponentTypes.Durability) as ItemDurabilityComponent;
-          if (
-            (slot === EquipmentSlot.Head || 
-             slot === EquipmentSlot.Chest || 
-             slot === EquipmentSlot.Legs || 
-             slot === EquipmentSlot.Feet) &&
-            durability && 
-            durability.damage >= durability.maxDurability - 10
-          ) {
-            durability.damage = 0;
+          const currentDamage = equipment.getDynamicProperty("item_editor:current_damage") as number;
+          if (durability.damage !== currentDamage) {
+            durability.damage = currentDamage;
+
             equippable.setEquipment(slot, equipment);
-          } else if (
-            (slot === EquipmentSlot.Mainhand || 
-             slot === EquipmentSlot.Offhand) &&
-            durability && 
-            durability.damage > 0
-          ) {
-            durability.damage = 0;
-            equippable.setEquipment(slot, equipment);
+            if (equipment.typeId.includes("leather") || equipment.typeId.includes("elytra")) {
+              player.runCommand(`stopsound @s armor.equip_leather`)
+            } else if (equipment.typeId.includes("chain")) {
+              player.runCommand(`stopsound @s armor.equip_chain`)
+            } else if (equipment.typeId.includes("iron")) {
+              player.runCommand(`stopsound @s armor.equip_iron`)
+            } else if (equipment.typeId.includes("gold")) {
+              player.runCommand(`stopsound @s armor.equip_gold`)
+            } else if (equipment.typeId.includes("diamond")) {
+              player.runCommand(`stopsound @s armor.equip_diamond`)
+            } else if (equipment.typeId.includes("netherite")) {
+              player.runCommand(`stopsound @s armor.equip_netherite`)
+            } else {
+              player.runCommand(`stopsound @s armor.equip_generic`)
+            }
           }
         }
       }
     }
   }
 }
+
 system.runInterval(onTick, tickDelay);

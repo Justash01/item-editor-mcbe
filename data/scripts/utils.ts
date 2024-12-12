@@ -629,3 +629,13 @@ export function formatSlotName(slot: EquipmentSlot): string {
   };
   return slotNames[slot] || "Unknown Slot";
 }
+
+/**
+ * Returns the targetEntities argument if it has more than one element, otherwise returns an empty array.
+ * This is used to provide a default value to functions that take an optional targetEntities array.
+ * @param {Entity[]} targetEntities The target entities to check.
+ * @returns {Entity[] | []} An array with targetEntities if it has more than one element, otherwise an empty array.
+ */
+export function getTargetEntitiesArgument(targetEntities) {
+  return (targetEntities?.length ?? 0) > 1 ? [targetEntities] : [];
+}
