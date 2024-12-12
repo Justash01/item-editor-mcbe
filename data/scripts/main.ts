@@ -36,10 +36,10 @@ function mainMenu(viewer: Player) {
 
     const sourceType = result.formValues?.[0];
     if (sourceType === 0) {
-      const targetSelector = result.formValues?.[1] as string;
+      let targetSelector = result.formValues?.[1] as string;
       if (!targetSelector) {
-        showErrorMessage(viewer, "No target selector was provided.", () => mainMenu(viewer));
-        return;
+        //showErrorMessage(viewer, "No target selector was provided.", () => mainMenu(viewer));
+        targetSelector = "@s";
       }
       const selector = parseSelector(viewer, targetSelector);
       if (selector.error) {

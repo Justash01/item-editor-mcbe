@@ -402,26 +402,30 @@ export class FormFieldManager {
  * @returns {Vector3 | string} - The parsed Vector3 coordinates or an error string if parsing fails.
  */
 export function parseCoords(player: Player, input: string): Vector3 | string {
-  const components = input.trim().split(/\s+/);
+  // Modified regex to capture coordinates with optional ~ or ^, including negative numbers
+  const components = input.trim().split(/\s*([~^]?-?\d*\.?\d*)\s*/);
+  
+  // Filter out empty strings and keep only meaningful coordinate components
+  const filteredComponents = components.filter(component => component.trim() !== '');
 
-  if (components.length !== 3) {
+  if (filteredComponents.length !== 3) {
     return "Error: Invalid coordinate input. Expected three components (x, y, z).";
   }
 
   try {
     const playerLocation = player.location; // Player's current location
 
-    const isRelative = components.some(component => component.startsWith("~"));
-    const isLocal = components.some(component => component.startsWith("^"));
+    const isRelative = filteredComponents.some(component => component.startsWith("~"));
+    const isLocal = filteredComponents.some(component => component.startsWith("^"));
 
     // Ensure ~ and ^ are not mixed
     if (isRelative && isLocal) {
       return "Error: Cannot mix relative (~) and local (^) coordinates.";
     }
 
-    const x = parseCoordinateWithDirection(player, components[0], playerLocation.x, "x");
-    const y = parseCoordinateWithDirection(player, components[1], playerLocation.y, "y");
-    const z = parseCoordinateWithDirection(player, components[2], playerLocation.z, "z");
+    const x = parseCoordinateWithDirection(player, filteredComponents[0], playerLocation.x, "x");
+    const y = parseCoordinateWithDirection(player, filteredComponents[1], playerLocation.y, "y");
+    const z = parseCoordinateWithDirection(player, filteredComponents[2], playerLocation.z, "z");
 
     if (typeof x === "string" || typeof y === "string" || typeof z === "string") {
       return "Error: One or more coordinates could not be parsed.";
